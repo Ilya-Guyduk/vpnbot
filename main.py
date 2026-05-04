@@ -94,6 +94,16 @@ VPN_PLANS = {
     "premium_1y": {"name": "Премиум на 1 год", "price": 3500, "duration": 365},
 }
 
+# Ссылки на статьи Telegraph
+# Создаются скриптом create_articles.py
+# Редактируются через auth_url в браузере
+ARTICLES = {
+    "android": "https://telegra.ph/Podklyuchenie-VPN-na-Android-05-04-2",
+    # "ios": "...",
+    # "windows": "...",
+    # "linux": "...",
+}
+
 # Инструменты для обхода цензуры
 CENSORSHIP_TOOLS = {
     "vpn": "VPN-сервисы для безопасного подключения",
@@ -318,44 +328,44 @@ async def show_tool_info(callback: CallbackQuery):
 @dp.callback_query(F.data.startswith("guide_"))
 async def show_guide(callback: CallbackQuery):
     platform = callback.data.replace("guide_", "")
-    guides = {
-        "android": (
-            "📱 <b>Настройка VPN на Android</b>\n\n"
-            "1. Скачайте приложение WireGuard из Google Play\n"
-            "2. Нажмите '+' и выберите 'Создать из QR-кода'\n"
-            "3. Отсканируйте QR-код, который мы пришлём после покупки VPN\n"
-            "4. Нажмите на переключатель для подключения\n\n"
-            "Альтернатива: используйте OpenVPN Connect"
-        ),
-        "ios": (
-            "🍎 <b>Настройка VPN на iOS</b>\n\n"
-            "1. Установите WireGuard из App Store\n"
-            "2. Откройте конфигурационный файл из Telegram\n"
-            "3. Нажмите 'Поделиться' → WireGuard\n"
-            "4. Добавьте конфигурацию и подключитесь"
-        ),
-        "windows": (
-            "💻 <b>Настройка VPN на Windows</b>\n\n"
-            "1. Скачайте WireGuard с wireguard.com/install/\n"
-            "2. Нажмите 'Add Tunnel' → 'Add empty tunnel...'\n"
-            "3. Вставьте полученную конфигурацию\n"
-            "4. Нажмите 'Activate'"
-        ),
-        "linux": (
-            "🐧 <b>Настройка VPN на Linux</b>\n\n"
-            "Ubuntu/Debian:\n"
-            "<code>sudo apt install wireguard</code>\n\n"
-            "Создайте файл /etc/wireguard/wg0.conf\n"
-            "Запустите: <code>sudo wg-quick up wg0</code>"
-        )
+    
+    platform_names = {
+        "android": "Android",
+        "ios": "iOS",
+        "windows": "Windows",
+        "linux": "Linux",
     }
     
     builder = InlineKeyboardBuilder()
-    builder.button(text="◀️ Назад к руководствам", callback_data="menu_guides")
+    
+    # Если статья опубликована на Telegraph — отправляем ссылку
+    if platform in ARTICLES:
+        text = (
+            f"📖 <b>Подключение VPN на {platform_names.get(platform, platform)}</b>\n\n"
+            f"Подробное руководство со скриншотами и решением частых проблем:\n\n"
+            f"👉 {ARTICLES[platform]}\n\n"
+            f"<i>Если что-то не получилось — напишите в раздел «Помощь».</i>"
+        )
+        builder.button(
+            text="📖 Открыть руководство", 
+            url=ARTICLES[platform]
+        )
+        builder.button(text="◀️ Назад к руководствам", callback_data="menu_guides")
+        builder.adjust(1)
+    else:
+        # Заглушка для платформ, по которым статья ещё не готова
+        text = (
+            f"📖 <b>Руководство для {platform_names.get(platform, platform)}</b>\n\n"
+            "🚧 Подробная инструкция в разработке.\n\n"
+            "Пока вы можете воспользоваться руководством для другой платформы или "
+            "написать в раздел «Помощь» — мы поможем настроить вручную."
+        )
+        builder.button(text="◀️ Назад к руководствам", callback_data="menu_guides")
     
     await callback.message.edit_text(
-        guides.get(platform, "Инструкция в разработке"),
-        reply_markup=builder.as_markup()
+        text,
+        reply_markup=builder.as_markup(),
+        link_preview_options=types.LinkPreviewOptions(is_disabled=False)
     )
     await callback.answer()
 
