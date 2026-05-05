@@ -1,264 +1,223 @@
 """
-Скрипт для создания/обновления статей на Telegraph.
+Скрипт для создания/обновления статей на Telegraph из Markdown-файлов.
 
 Использование:
-    python create_articles.py
+    python create_articles.py              # Все статьи
+    python create_articles.py android      # Только указанная статья
 
-Создаёт все статьи и выводит их URL. URL нужно вставить в main.py
-в словарь ARTICLES.
+Статьи лежат в папке articles/ в формате .md.
+Список URL и метаданных — в articles/_config.py.
 
-Для редактирования созданных статей используйте auth_url, который
-вы получили при создании Telegraph-аккаунта.
+Чтобы добавить новую статью:
+1. Создай articles/имя.md
+2. Добавь "имя": None в ARTICLES в articles/_config.py
+3. Запусти скрипт — он создаст статью и выведет URL
+4. Вставь URL вместо None в _config.py
+
+Чтобы редактировать существующую статью:
+1. Правь .md файл
+2. Запусти скрипт — статья обновится по сохранённому URL
 """
 
 import asyncio
-import os
 import json
+import os
+import re
+import sys
+from pathlib import Path
+
 import aiohttp
 from dotenv import load_dotenv
+
+# Импорт конфига статей
+sys.path.insert(0, str(Path(__file__).parent / "articles"))
+from articles._config import ARTICLES, DEFAULT_AUTHOR  # noqa: E402
 
 load_dotenv()
 
 TELEGRAPH_TOKEN = os.getenv("TELEGRAPH_TOKEN")
+ARTICLES_DIR = Path(__file__).parent / "articles"
 
 if not TELEGRAPH_TOKEN:
     raise ValueError("TELEGRAPH_TOKEN не задан в .env!")
 
 
 # ============================================================
-# ХЕЛПЕРЫ ДЛЯ ФОРМИРОВАНИЯ TELEGRAPH-КОНТЕНТА
+# КОНВЕРТЕР MARKDOWN -> TELEGRAPH NODES
 # ============================================================
-# Telegraph принимает контент в виде дерева Node-объектов.
-# Каждый Node — это либо строка, либо dict с tag/children.
-# Поддерживаемые теги: a, aside, b, blockquote, br, code, em,
-# figure, h3, h4, hr, i, iframe, img, li, ol, p, pre, s,
-# strong, u, ul, video.
+# Telegraph принимает контент как дерево узлов вида:
+#   {"tag": "p", "children": ["текст", {"tag": "b", "children": ["жирный"]}]}
+# Поддерживаемые теги: a, blockquote, br, code, em, h3, h4, hr,
+# i, img, li, ol, p, pre, strong, ul.
+#
+# Это упрощённый парсер — поддерживает то, что нам реально нужно
+# для гайдов: заголовки, списки, ссылки, жирный/курсив, код,
+# цитаты, горизонтальные линии, абзацы.
 
-def p(*children):
-    """Параграф."""
-    return {"tag": "p", "children": list(children)}
 
-def h3(text):
-    """Заголовок уровня 3 (большой)."""
-    return {"tag": "h3", "children": [text]}
-
-def h4(text):
-    """Заголовок уровня 4 (поменьше)."""
-    return {"tag": "h4", "children": [text]}
-
-def b(text):
-    """Жирный."""
-    return {"tag": "strong", "children": [text]}
-
-def i(text):
-    """Курсив."""
-    return {"tag": "em", "children": [text]}
-
-def code(text):
-    """Моноширинный (для команд, кода)."""
-    return {"tag": "code", "children": [text]}
-
-def link(text, url):
-    """Ссылка."""
-    return {"tag": "a", "attrs": {"href": url}, "children": [text]}
-
-def anchor(text, heading):
+def parse_inline(text):
     """
-    Якорная ссылка на заголовок внутри той же статьи.
-    heading — точный текст заголовка (h3/h4).
-    Telegraph сам генерирует id из текста заголовка.
+    Парсит inline-форматирование внутри строки текста:
+    **жирный**, *курсив*, `код`, [текст](url)
+
+    Возвращает список узлов Telegraph (строки и dict-ы).
     """
-    # Telegraph превращает текст заголовка в id: пробелы → дефисы,
-    # сохраняет регистр и большинство символов как есть
-    anchor_id = heading.replace(" ", "-")
-    return {"tag": "a", "attrs": {"href": f"#{anchor_id}"}, "children": [text]}
+    nodes = []
+    pos = 0
 
-def anchor(text, heading):
+    # Регулярка ищет любой из паттернов, выбирает первое совпадение
+    pattern = re.compile(
+        r"(\*\*(?P<bold>[^*]+)\*\*)"           # **жирный**
+        r"|(`(?P<code>[^`]+)`)"                # `код`
+        r"|(\[(?P<link_text>[^\]]+)\]\((?P<link_url>[^)]+)\))"  # [текст](url)
+        r"|(\*(?P<italic>[^*]+)\*)"            # *курсив*
+    )
+
+    for match in pattern.finditer(text):
+        # Текст до совпадения — добавляем как есть
+        if match.start() > pos:
+            nodes.append(text[pos:match.start()])
+
+        if match.group("bold"):
+            nodes.append({"tag": "strong", "children": [match.group("bold")]})
+        elif match.group("code"):
+            nodes.append({"tag": "code", "children": [match.group("code")]})
+        elif match.group("link_text"):
+            nodes.append({
+                "tag": "a",
+                "attrs": {"href": match.group("link_url")},
+                "children": [match.group("link_text")]
+            })
+        elif match.group("italic"):
+            nodes.append({"tag": "em", "children": [match.group("italic")]})
+
+        pos = match.end()
+
+    # Хвост после последнего совпадения
+    if pos < len(text):
+        nodes.append(text[pos:])
+
+    # Если ничего не нашли — возвращаем просто строку
+    if not nodes:
+        return [text]
+
+    return nodes
+
+
+def parse_markdown(markdown):
     """
-    Якорная ссылка на заголовок внутри той же статьи.
-    Telegraph автоматически создаёт ID для заголовков:
-    пробелы заменяет на дефисы, спецсимволы убирает.
+    Парсит markdown-файл и возвращает (title, content_nodes).
+    Title берётся из первого # заголовка.
     """
-    # Преобразуем заголовок в формат якоря
-    anchor_id = heading.replace(" ", "-")
-    return {"tag": "a", "attrs": {"href": f"#{anchor_id}"}, "children": [text]}
+    lines = markdown.split("\n")
+    title = ""
+    nodes = []
+    i = 0
 
-def ul(*items):
-    """Маркированный список. items — список текстов или Node."""
-    return {
-        "tag": "ul",
-        "children": [
-            {"tag": "li", "children": [item] if isinstance(item, str) else item if isinstance(item, list) else [item]}
-            for item in items
-        ]
-    }
+    while i < len(lines):
+        line = lines[i].rstrip()
 
-def ol(*items):
-    """Нумерованный список."""
-    return {
-        "tag": "ol",
-        "children": [
-            {"tag": "li", "children": [item] if isinstance(item, str) else item if isinstance(item, list) else [item]}
-            for item in items
-        ]
-    }
+        # Заголовок верхнего уровня — это title статьи
+        if line.startswith("# ") and not title:
+            title = line[2:].strip()
+            i += 1
+            continue
 
-def li(*children):
-    """Элемент списка с несколькими детьми."""
-    return list(children)
+        # Заголовки h3 (### Foo) и h4 (#### Foo)
+        if line.startswith("#### "):
+            nodes.append({"tag": "h4", "children": [line[5:].strip()]})
+            i += 1
+            continue
+        if line.startswith("### "):
+            nodes.append({"tag": "h3", "children": [line[4:].strip()]})
+            i += 1
+            continue
 
-def blockquote(*children):
-    """Цитата (для важных предупреждений)."""
-    return {"tag": "blockquote", "children": list(children)}
+        # Горизонтальная линия
+        if line.strip() == "---":
+            nodes.append({"tag": "hr"})
+            i += 1
+            continue
 
-def hr():
-    """Горизонтальная черта."""
-    return {"tag": "hr"}
+        # Цитата (>)
+        if line.startswith("> "):
+            quote_lines = []
+            while i < len(lines) and lines[i].startswith("> "):
+                quote_lines.append(lines[i][2:].strip())
+                i += 1
+            quote_text = " ".join(quote_lines)
+            nodes.append({
+                "tag": "blockquote",
+                "children": [{"tag": "p", "children": parse_inline(quote_text)}]
+            })
+            continue
 
+        # Блок кода (```)
+        if line.strip().startswith("```"):
+            code_lines = []
+            i += 1
+            while i < len(lines) and not lines[i].strip().startswith("```"):
+                code_lines.append(lines[i])
+                i += 1
+            i += 1  # Пропустить закрывающие ```
+            code_text = "\n".join(code_lines)
+            nodes.append({"tag": "pre", "children": [code_text]})
+            continue
 
-# ============================================================
-# СТАТЬЯ: ANDROID
-# ============================================================
+        # Маркированный список (- item) или нумерованный (1. item)
+        if re.match(r"^\s*[-*]\s+", line) or re.match(r"^\s*\d+\.\s+", line):
+            is_ordered = bool(re.match(r"^\s*\d+\.\s+", line))
+            list_items = []
+            while i < len(lines):
+                current = lines[i]
+                if re.match(r"^\s*[-*]\s+", current) or re.match(r"^\s*\d+\.\s+", current):
+                    item_text = re.sub(r"^\s*([-*]|\d+\.)\s+", "", current).strip()
+                    list_items.append({
+                        "tag": "li",
+                        "children": parse_inline(item_text)
+                    })
+                    i += 1
+                elif current.strip() == "":
+                    # Пустая строка — конец списка
+                    break
+                else:
+                    break
+            nodes.append({
+                "tag": "ol" if is_ordered else "ul",
+                "children": list_items
+            })
+            continue
 
-ANDROID_ARTICLE = {
-    "title": "Подключение VPN на Android",
-    "author_name": "VPN Bot",
-    "content": [
-        p("Ниже — подробная инструкция по подключению нашего VPN на Android. Используется протокол ", b("VLESS Reality"), " — один из самых стабильных способов обхода блокировок в России на сегодня."),
+        # Пустая строка — пропускаем
+        if line.strip() == "":
+            i += 1
+            continue
 
-        h3("Содержание"),
-        ul(
-            anchor("Какое приложение выбрать", "Какое-приложение-выбрать"),
-            anchor("Способ 1 — v2rayNG", "Способ-1-—-v2rayNG"),
-            anchor("Способ 2 — Hiddify", "Способ-2-—-Hiddify"),
-            anchor("Решение проблем", "Решение-проблем"),
-            anchor("Полезные мелочи", "Полезные-мелочи"),
-        ),
+        # Обычный абзац (может быть многострочным)
+        para_lines = []
+        while i < len(lines) and lines[i].strip() != "":
+            current = lines[i].rstrip()
+            # Проверим что строка не начинает другой блок
+            if (current.startswith("#") or current.startswith(">") or
+                current.startswith("```") or current.strip() == "---" or
+                re.match(r"^\s*[-*]\s+", current) or
+                re.match(r"^\s*\d+\.\s+", current)):
+                break
+            para_lines.append(current)
+            i += 1
 
-        hr(),
+        if para_lines:
+            para_text = " ".join(para_lines)
+            nodes.append({"tag": "p", "children": parse_inline(para_text)})
 
-        h3("Какое приложение выбрать"),
-
-        p("Для VLESS Reality нужен специальный клиент. Рекомендуем по порядку:"),
-
-        ul(
-            li(b("v2rayNG"), " — самый популярный, стабильный, активно обновляется"),
-            li(b("Hiddify"), " — современный интерфейс, проще для новичков"),
-            li(b("NekoBox"), " — мощный, для продвинутых пользователей"),
-        ),
-
-        blockquote(
-            p(b("Важно: "), "В Google Play эти приложения периодически скрывают для российских аккаунтов. Если в Play Маркет их нет — устанавливайте APK с GitHub (ссылки ниже). Это безопасно — это официальные релизы от разработчиков.")
-        ),
-
-        hr(),
-
-        h3("Способ 1 — v2rayNG"),
-
-        h4("Шаг 1. Установите приложение"),
-
-        p("Откройте на телефоне страницу релизов:"),
-        p(link("github.com/2dust/v2rayNG/releases", "https://github.com/2dust/v2rayNG/releases")),
-
-        p("Скачайте файл с названием вида ", code("v2rayNG_X.X.X_universal.apk"), " (последняя версия)."),
-
-        p("Откройте скачанный APK — Android попросит разрешить установку из неизвестных источников. Разрешите для браузера или файлового менеджера."),
-
-        h4("Шаг 2. Импортируйте ключ"),
-
-        p("После покупки бот пришлёт вам два варианта:"),
-        ul(
-            "QR-код (картинка)",
-            "Текстовая ссылка вида vless://..."
-        ),
-
-        p(b("Если у вас QR-код:")),
-        ol(
-            "Откройте v2rayNG",
-            "Нажмите «+» в правом верхнем углу",
-            "Выберите «Импорт конфигурации из QR-кода»",
-            "Отсканируйте QR с экрана компьютера или другого устройства"
-        ),
-
-        p(b("Если у вас текстовая ссылка:")),
-        ol(
-            "Скопируйте ссылку из бота (долгое нажатие → копировать)",
-            "Откройте v2rayNG",
-            "Нажмите «+» → «Импорт конфигурации из буфера обмена»",
-            "Конфиг добавится автоматически"
-        ),
-
-        h4("Шаг 3. Подключитесь"),
-
-        ol(
-            "В списке профилей нажмите на добавленный сервер",
-            "Нажмите большую круглую кнопку «V» внизу справа",
-            "Android спросит разрешение на VPN — согласитесь",
-            "Кнопка станет зелёной — VPN подключён"
-        ),
-
-        h4("Шаг 4. Проверьте работу"),
-
-        p("Откройте сайт ", link("2ip.ru", "https://2ip.ru"), " — он должен показать другой IP-адрес и страну."),
-
-        hr(),
-
-        h3("Способ 2 — Hiddify"),
-
-        p("Если интерфейс v2rayNG показался сложным — попробуйте Hiddify. Он более дружелюбен к новичкам."),
-
-        p(b("Установка:"), " ", link("github.com/hiddify/hiddify-app/releases", "https://github.com/hiddify/hiddify-app/releases"), " — скачайте файл с пометкой Android."),
-
-        p(b("Подключение:")),
-        ol(
-            "Откройте Hiddify",
-            "Нажмите «Добавить профиль»",
-            "Выберите «Импорт из буфера обмена» или сканер QR-кода",
-            "Нажмите «Подключиться»"
-        ),
-
-        hr(),
-
-        h3("Решение проблем"),
-
-        h4("VPN подключается, но интернет не работает"),
-
-        p("Проверьте по очереди:"),
-        ul(
-            "Корректность ключа — попробуйте удалить профиль и импортировать заново",
-            "Срок действия подписки в боте — команда /my_key",
-            "Перезагрузите телефон и попробуйте снова",
-            "Попробуйте другой клиент (если был v2rayNG — поставьте Hiddify, и наоборот)"
-        ),
-
-        h4("Не получается установить APK"),
-
-        p("Откройте ", b("Настройки → Приложения → Специальный доступ → Установка неизвестных приложений"), ". Найдите браузер или файловый менеджер, через который пытаетесь установить, и разрешите."),
-
-        h4("Подключается, но некоторые сайты не открываются"),
-
-        p("Иногда помогает смена DNS внутри клиента. В v2rayNG откройте Настройки → Удалённый DNS → впишите ", code("1.1.1.1"), " или ", code("8.8.8.8"), "."),
-
-        hr(),
-
-        h3("Полезные мелочи"),
-
-        ul(
-            "В v2rayNG можно настроить автоподключение при старте телефона: Настройки → Опции по умолчанию → «Автоматически подключаться при старте»",
-            "Чтобы VPN работал только для отдельных приложений, включите режим «Per-app proxy» в настройках",
-            "На Android TV v2rayNG тоже работает, но иконку приходится запускать через файловый менеджер",
-        ),
-
-        p(i("Если что-то не получилось — напишите в поддержку через меню «Помощь» в боте.")),
-    ]
-}
+    return title, nodes
 
 
 # ============================================================
 # ВЫЗОВ TELEGRAPH API
 # ============================================================
 
-async def create_page(session, title, content, author_name="VPN Bot"):
+async def create_page(session, title, content, author_name=DEFAULT_AUTHOR):
     """Создать новую страницу на Telegraph."""
     url = "https://api.telegra.ph/createPage"
     data = {
@@ -275,12 +234,8 @@ async def create_page(session, title, content, author_name="VPN Bot"):
         return result["result"]
 
 
-async def edit_page(session, path, title, content, author_name="VPN Bot"):
-    """
-    Обновить существующую страницу по path (часть URL после telegra.ph/).
-    Например, для https://telegra.ph/Podklyuchenie-VPN-na-Android-05-04-2
-    path будет 'Podklyuchenie-VPN-na-Android-05-04-2'.
-    """
+async def edit_page(session, path, title, content, author_name=DEFAULT_AUTHOR):
+    """Обновить существующую страницу на Telegraph."""
     url = "https://api.telegra.ph/editPage"
     data = {
         "access_token": TELEGRAPH_TOKEN,
@@ -298,69 +253,81 @@ async def edit_page(session, path, title, content, author_name="VPN Bot"):
 
 
 def url_to_path(url):
-    """Извлекает path из URL Telegraph."""
-    return url.rstrip("/").split("/")[-1]
+    """Извлекает path из URL Telegraph (часть после telegra.ph/)."""
+    return url.replace("https://telegra.ph/", "").replace("http://telegra.ph/", "").strip("/")
 
 
 # ============================================================
-# СУЩЕСТВУЮЩИЕ СТАТЬИ
+# ОСНОВНАЯ ЛОГИКА
 # ============================================================
-# Если статья уже создана — впиши её URL сюда, и скрипт будет
-# её обновлять, а не создавать новую.
 
-EXISTING_ARTICLES = {
-    "android": "https://telegra.ph/Podklyuchenie-VPN-na-Android-05-04-2",
-    # "ios": "...",
-    # "windows": "...",
-    # "linux": "...",
-}
+async def process_article(session, slug):
+    """Создать или обновить одну статью."""
+    md_file = ARTICLES_DIR / f"{slug}.md"
+
+    if not md_file.exists():
+        print(f"   ❌ Файл не найден: {md_file}")
+        return None
+
+    markdown_text = md_file.read_text(encoding="utf-8")
+    title, content = parse_markdown(markdown_text)
+
+    if not title:
+        print(f"   ❌ В файле нет заголовка # ...")
+        return None
+
+    existing_url = ARTICLES.get(slug)
+
+    try:
+        if existing_url:
+            # Обновляем существующую
+            print(f"🔄 Обновляю статью: {slug} ({existing_url})")
+            path = url_to_path(existing_url)
+            page = await edit_page(session, path, title, content)
+            print(f"   ✅ Обновлено: {page['url']}")
+            return page["url"]
+        else:
+            # Создаём новую
+            print(f"🆕 Создаю новую статью: {slug}")
+            page = await create_page(session, title, content)
+            print(f"   ✅ Создано: {page['url']}")
+            print(f"   ⚠️  ВАЖНО: добавь этот URL в articles/_config.py!")
+            return page["url"]
+    except Exception as e:
+        print(f"   ❌ Ошибка: {e}")
+        return None
 
 
 async def main():
-    articles_to_create = [
-        ("android", ANDROID_ARTICLE),
-        # Сюда позже добавим: ios, windows, linux, goodbyedpi, zapret, byebye_dpi, tor, dns
-    ]
+    # Если передан аргумент — обрабатываем только одну статью
+    target_slug = sys.argv[1] if len(sys.argv) > 1 else None
 
     print("=" * 60)
     print("СОЗДАНИЕ/ОБНОВЛЕНИЕ СТАТЕЙ НА TELEGRAPH")
     print("=" * 60)
 
+    # Собираем список slug для обработки
+    if target_slug:
+        slugs = [target_slug]
+        if target_slug not in ARTICLES:
+            print(f"⚠️  Статьи '{target_slug}' нет в _config.py — будет создана новая")
+    else:
+        # Берём все .md файлы из папки articles, кроме служебных (с _ в начале)
+        slugs = sorted(
+            f.stem for f in ARTICLES_DIR.glob("*.md")
+            if not f.stem.startswith("_")
+        )
+
     results = {}
 
     async with aiohttp.ClientSession() as session:
-        for slug, article in articles_to_create:
-            existing_url = EXISTING_ARTICLES.get(slug)
-            
-            try:
-                if existing_url:
-                    # Обновляем существующую статью
-                    path = url_to_path(existing_url)
-                    print(f"\n🔄 Обновляю статью: {slug} ({existing_url})")
-                    page = await edit_page(
-                        session,
-                        path=path,
-                        title=article["title"],
-                        content=article["content"],
-                        author_name=article.get("author_name", "VPN Bot")
-                    )
-                    results[slug] = page["url"]
-                    print(f"   ✅ Обновлено: {page['url']}")
-                else:
-                    # Создаём новую
-                    print(f"\n📝 Создаю статью: {slug}...")
-                    page = await create_page(
-                        session,
-                        title=article["title"],
-                        content=article["content"],
-                        author_name=article.get("author_name", "VPN Bot")
-                    )
-                    results[slug] = page["url"]
-                    print(f"   ✅ Создано: {page['url']}")
-            except Exception as e:
-                print(f"   ❌ Ошибка: {e}")
+        for slug in slugs:
+            url = await process_article(session, slug)
+            if url:
+                results[slug] = url
 
-    print("\n" + "=" * 60)
+    print()
+    print("=" * 60)
     print("ГОТОВО! Актуальные URL статей:")
     print("=" * 60)
     print()
@@ -371,7 +338,8 @@ async def main():
     print()
     print("=" * 60)
     print("ВАЖНО:")
-    print("- Если URL изменился — обнови ARTICLES в main.py")
+    print("- Если создавалась новая статья — обнови URL в articles/_config.py")
+    print("- Также обнови ARTICLES в main.py если используешь эту статью в боте")
     print("- Чтобы редактировать через сайт — используй auth_url,")
     print("  который ты получил при создании Telegraph-аккаунта")
     print("=" * 60)
