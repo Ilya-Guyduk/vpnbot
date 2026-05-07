@@ -1,0 +1,37 @@
+name: Publish articles to Telegraph
+
+# Когда запускать
+on:
+  # При пуше в main, если изменены .md файлы или конфиг статей
+  push:
+    branches: [main]
+    paths:
+      - 'articles/**.md'
+      - 'articles/_config.py'
+      - 'create_articles.py'
+
+  # Также можно запустить вручную с GitHub
+  workflow_dispatch:
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          pip install python-dotenv aiohttp
+
+      - name: Publish articles to Telegraph
+        env:
+          TELEGRAPH_TOKEN: ${{ secrets.TELEGRAPH_TOKEN }}
+        run: |
+          python create_articles.py
