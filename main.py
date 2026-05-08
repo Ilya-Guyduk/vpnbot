@@ -1,37 +1,25 @@
 import asyncio
 import logging
-import os
 from datetime import datetime, timedelta
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import Command
 from aiogram.types import LabeledPrice, PreCheckoutQuery, Message, CallbackQuery
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiogram.enums import ParseMode
-from aiogram.client.default import DefaultBotProperties
-from dotenv import load_dotenv
 import sqlite3
 from contextlib import contextmanager
-
-# Загрузка переменных окружения из .env
-load_dotenv()
 
 # Настройка логирования
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Конфигурация из .env
-BOT_TOKEN = os.getenv("BOT_TOKEN")
-PAYMENT_PROVIDER_TOKEN = os.getenv("PAYMENT_PROVIDER_TOKEN", "")
-ADMIN_IDS = [int(x) for x in os.getenv("ADMIN_IDS", "").split(",") if x.strip()]
-
-# Проверка обязательных переменных
-if not BOT_TOKEN:
-    raise ValueError("BOT_TOKEN не задан в .env файле!")
-if not ADMIN_IDS:
-    logger.warning("ADMIN_IDS не задан — админ-команды будут недоступны")
+# Конфигурация (в реальном проекте используй переменные окружения)
+BOT_TOKEN = "YOUR_BOT_TOKEN_HERE"
+PAYMENT_PROVIDER_TOKEN = "YOUR_PAYMENT_PROVIDER_TOKEN"  # Тестовый: 284685063:TEST:NmI5Njg0YjA2
+ADMIN_IDS = [123456789]  # ID администраторов
 
 # Инициализация бота и диспетчера
-bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
+bot = Bot(token=BOT_TOKEN, parse_mode=ParseMode.HTML)
 dp = Dispatcher()
 
 # База данных
@@ -92,17 +80,6 @@ VPN_PLANS = {
     "premium_1m": {"name": "Премиум на 1 месяц", "price": 500, "duration": 30},
     "premium_3m": {"name": "Премиум на 3 месяца", "price": 1200, "duration": 90},
     "premium_1y": {"name": "Премиум на 1 год", "price": 3500, "duration": 365},
-}
-
-# Ссылки на статьи Telegraph
-# Создаются скриптом create_articles.py
-# Редактируются через auth_url в браузере
-ARTICLES = {
-    "android": "https://telegra.ph/Podklyuchenie-VPN-na-Android-05-04-2",
-    "routing_v2rayng": "https://telegra.ph/Marshrutizaciya-v-v2rayNG--rossijskie-sajty-napryamuyu-05-05",
-    "ios": "https://telegra.ph/Podklyuchenie-VPN-na-iOS-iPhone-i-iPad-05-07",
-    # "windows": "...",
-    # "linux": "...",
 }
 
 # Инструменты для обхода цензуры
@@ -321,7 +298,7 @@ async def show_tool_info(callback: CallbackQuery):
     await callback.message.edit_text(
         tool_info.get(tool, "Информация временно недоступна"),
         reply_markup=builder.as_markup(),
-        link_preview_options=types.LinkPreviewOptions(is_disabled=True)
+        disable_web_page_preview=True
     )
     await callback.answer()
 
@@ -329,44 +306,44 @@ async def show_tool_info(callback: CallbackQuery):
 @dp.callback_query(F.data.startswith("guide_"))
 async def show_guide(callback: CallbackQuery):
     platform = callback.data.replace("guide_", "")
-    
-    platform_names = {
-        "android": "Android",
-        "ios": "iOS",
-        "windows": "Windows",
-        "linux": "Linux",
+    guides = {
+        "android": (
+            "📱 <b>Настройка VPN на Android</b>\n\n"
+            "1. Скачайте приложение WireGuard из Google Play\n"
+            "2. Нажмите '+' и выберите 'Создать из QR-кода'\n"
+            "3. Отсканируйте QR-код, который мы пришлём после покупки VPN\n"
+            "4. Нажмите на переключатель для подключения\n\n"
+            "Альтернатива: используйте OpenVPN Connect"
+        ),
+        "ios": (
+            "🍎 <b>Настройка VPN на iOS</b>\n\n"
+            "1. Установите WireGuard из App Store\n"
+            "2. Откройте конфигурационный файл из Telegram\n"
+            "3. Нажмите 'Поделиться' → WireGuard\n"
+            "4. Добавьте конфигурацию и подключитесь"
+        ),
+        "windows": (
+            "💻 <b>Настройка VPN на Windows</b>\n\n"
+            "1. Скачайте WireGuard с wireguard.com/install/\n"
+            "2. Нажмите 'Add Tunnel' → 'Add empty tunnel...'\n"
+            "3. Вставьте полученную конфигурацию\n"
+            "4. Нажмите 'Activate'"
+        ),
+        "linux": (
+            "🐧 <b>Настройка VPN на Linux</b>\n\n"
+            "Ubuntu/Debian:\n"
+            "<code>sudo apt install wireguard</code>\n\n"
+            "Создайте файл /etc/wireguard/wg0.conf\n"
+            "Запустите: <code>sudo wg-quick up wg0</code>"
+        )
     }
     
     builder = InlineKeyboardBuilder()
-    
-    # Если статья опубликована на Telegraph — отправляем ссылку
-    if platform in ARTICLES:
-        text = (
-            f"📖 <b>Подключение VPN на {platform_names.get(platform, platform)}</b>\n\n"
-            f"Подробное руководство со скриншотами и решением частых проблем:\n\n"
-            f"👉 {ARTICLES[platform]}\n\n"
-            f"<i>Если что-то не получилось — напишите в раздел «Помощь».</i>"
-        )
-        builder.button(
-            text="📖 Открыть руководство", 
-            url=ARTICLES[platform]
-        )
-        builder.button(text="◀️ Назад к руководствам", callback_data="menu_guides")
-        builder.adjust(1)
-    else:
-        # Заглушка для платформ, по которым статья ещё не готова
-        text = (
-            f"📖 <b>Руководство для {platform_names.get(platform, platform)}</b>\n\n"
-            "🚧 Подробная инструкция в разработке.\n\n"
-            "Пока вы можете воспользоваться руководством для другой платформы или "
-            "написать в раздел «Помощь» — мы поможем настроить вручную."
-        )
-        builder.button(text="◀️ Назад к руководствам", callback_data="menu_guides")
+    builder.button(text="◀️ Назад к руководствам", callback_data="menu_guides")
     
     await callback.message.edit_text(
-        text,
-        reply_markup=builder.as_markup(),
-        link_preview_options=types.LinkPreviewOptions(is_disabled=False)
+        guides.get(platform, "Инструкция в разработке"),
+        reply_markup=builder.as_markup()
     )
     await callback.answer()
 
@@ -377,10 +354,6 @@ async def process_vpn_purchase(callback: CallbackQuery):
     
     if plan_id not in VPN_PLANS:
         await callback.answer("❌ Тариф не найден")
-        return
-    
-    if not PAYMENT_PROVIDER_TOKEN:
-        await callback.answer("⚠️ Оплата временно недоступна", show_alert=True)
         return
     
     plan = VPN_PLANS[plan_id]
@@ -407,28 +380,10 @@ async def process_vpn_purchase(callback: CallbackQuery):
 
 @dp.pre_checkout_query()
 async def process_pre_checkout(pre_checkout_query: PreCheckoutQuery):
-    # Парсим plan_id из payload (формат: vpn_basic_1m_userid)
-    payload_parts = pre_checkout_query.invoice_payload.split("_")
-    
-    try:
-        plan_id = f"{payload_parts[1]}_{payload_parts[2]}" if len(payload_parts) > 3 else payload_parts[1]
-    except IndexError:
-        await bot.answer_pre_checkout_query(
-            pre_checkout_query.id,
-            ok=False,
-            error_message="❌ Ошибка обработки заказа. Попробуйте позже."
-        )
-        return
-    
-    if plan_id not in VPN_PLANS:
-        await bot.answer_pre_checkout_query(
-            pre_checkout_query.id,
-            ok=False,
-            error_message="❌ Тариф не найден. Попробуйте позже."
-        )
-        return
-    
     # Проверяем наличие ключей перед списанием
+    payload_parts = pre_checkout_query.invoice_payload.split("_")
+    plan_id = f"{payload_parts[1]}_{payload_parts[2]}" if len(payload_parts) > 3 else payload_parts[1]
+    
     with get_db() as conn:
         cursor = conn.cursor()
         cursor.execute(
@@ -454,30 +409,7 @@ async def process_successful_payment(message: Message):
     
     # Извлекаем информацию из payload
     payload_parts = payload.split("_")
-    
-    try:
-        plan_id = f"{payload_parts[1]}_{payload_parts[2]}" if len(payload_parts) > 3 else payload_parts[1]
-    except IndexError:
-        plan_id = None
-    
-    if plan_id not in VPN_PLANS:
-        await message.answer(
-            "❌ Произошла ошибка при обработке платежа. Свяжитесь с поддержкой: @support",
-            reply_markup=get_main_keyboard()
-        )
-        for admin_id in ADMIN_IDS:
-            try:
-                await bot.send_message(
-                    admin_id,
-                    f"⚠️ КРИТИЧЕСКАЯ ОШИБКА!\n"
-                    f"Оплата прошла, но не удалось определить тариф.\n"
-                    f"Пользователь: {message.from_user.id}\n"
-                    f"Payload: {payload}\n"
-                    f"Сумма: {payment.total_amount // 100}₽"
-                )
-            except:
-                pass
-        return
+    plan_id = f"{payload_parts[1]}_{payload_parts[2]}" if len(payload_parts) > 3 else payload_parts[1]
     
     with get_db() as conn:
         cursor = conn.cursor()
@@ -603,28 +535,26 @@ async def main():
     # Инициализация БД
     init_db()
     
-    # Проверяем наличие ключей в БД
+    # Добавляем тестовые ключи, если их нет (для демонстрации)
     with get_db() as conn:
         cursor = conn.cursor()
-        cursor.execute('SELECT COUNT(*) FROM vpn_keys WHERE is_used = 0')
-        free_keys = cursor.fetchone()[0]
-        if free_keys == 0:
-            logger.warning(
-                "В базе нет свободных ключей! "
-                "Добавьте их через команду /add_keys ДНИ KEY1,KEY2,..."
+        cursor.execute('SELECT COUNT(*) FROM vpn_keys')
+        if cursor.fetchone()[0] == 0:
+            # Добавляем демо-ключи
+            demo_keys = [
+                ("demo_key_basic_30d_XXXX", 30),
+                ("demo_key_premium_30d_YYYY", 30),
+                ("demo_key_premium_90d_ZZZZ", 90),
+                ("demo_key_premium_365d_WWWW", 365),
+            ]
+            cursor.executemany(
+                'INSERT INTO vpn_keys (key_value, duration_days) VALUES (?, ?)',
+                demo_keys
             )
-        else:
-            logger.info(f"Свободных ключей в базе: {free_keys}")
+            logger.info("Добавлены демонстрационные ключи")
     
     logger.info("Бот запущен")
-    try:
-        await dp.start_polling(bot)
-    finally:
-        await bot.session.close()
-        logger.info("Бот остановлен")
+    await dp.start_polling(bot)
 
 if __name__ == "__main__":
-    try:
-        asyncio.run(main())
-    except (KeyboardInterrupt, SystemExit):
-        logger.info("Бот остановлен пользователем")
+    asyncio.run(main())
