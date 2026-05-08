@@ -60,12 +60,14 @@ async def cb_buy_vpn(callback: CallbackQuery, bot: Bot) -> None:
         amount_stars=plan["price_stars"],
         duration_days=plan["duration"],
     )
+    logger.info(f"send_invoice plan_id:{plan_id}, plan{plan}, order_id:{order_id}, price:{LabeledPrice(label=plan["name"], amount=plan["price_stars"])}")
 
     await bot.send_invoice(
         chat_id=callback.from_user.id,
         title=plan["name"],
         description="VPN-подписка для обхода цензуры",
         payload=_make_payload(plan_id, order_id),
+        provider_token='2051251535:TEST:OTk5MDA4ODgxLTAwNQ',
         currency="XTR",          # Telegram Stars — без provider_token
         prices=[LabeledPrice(label=plan["name"], amount=plan["price_stars"])],
     )
@@ -76,6 +78,7 @@ async def cb_buy_vpn(callback: CallbackQuery, bot: Bot) -> None:
 
 @router.pre_checkout_query()
 async def cb_pre_checkout(pre_checkout: PreCheckoutQuery, bot: Bot) -> None:
+    logger.debug(f"cb_pre_checkout()")
     plan_id, order_id = _parse_payload(pre_checkout.invoice_payload)
 
     if plan_id is None or plan_id not in VPN_PLANS:
