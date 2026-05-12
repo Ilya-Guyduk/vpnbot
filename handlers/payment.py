@@ -67,7 +67,6 @@ async def cb_buy_vpn(callback: CallbackQuery, bot: Bot) -> None:
         title=plan["name"],
         description="VPN-подписка для обхода цензуры",
         payload=_make_payload(plan_id, order_id),
-        provider_token='2051251535:TEST:OTk5MDA4ODgxLTAwNQ',
         currency="XTR",          # Telegram Stars — без provider_token
         prices=[LabeledPrice(label=plan["name"], amount=plan["price_stars"])],
     )
