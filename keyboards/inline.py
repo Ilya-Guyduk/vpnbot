@@ -7,9 +7,11 @@ from data.articles import ARTICLES
 def kb_main() -> InlineKeyboardMarkup:
     b = InlineKeyboardBuilder()
     b.button(text="🔒 VPN-сервисы",       callback_data="menu_vpn")
-    b.button(text="🛠 Другие инструменты", callback_data="menu_tools")
-    b.button(text="📖 Руководства",        callback_data="menu_guides")
-    b.button(text="❓ Помощь",             callback_data="menu_help")
+    b.button(text="🛠 Софт",               callback_data="menu_tools")
+    b.button(text="🛠 Настройки ПО",       callback_data="menu_tools")
+    b.button(text="🛠 Полезные ссылки",    callback_data="menu_tools")
+    b.button(text="📖 Руководства",       callback_data="menu_guides")
+    b.button(text="❓ Помощь",            callback_data="menu_help")
     b.adjust(2, 2)
     return b.as_markup()
 
@@ -28,6 +30,8 @@ def kb_vpn_plans() -> InlineKeyboardMarkup:
 
 def kb_tools() -> InlineKeyboardMarkup:
     b = InlineKeyboardBuilder()
+    b.button(text="🌍 VPN-клиенты",    callback_data="menu_vpn_clients")
+    b.button(text="🌍 VPN-серверы",    callback_data="tool_proxy")
     b.button(text="🌐 Tor Browser",    callback_data="tool_tor")
     b.button(text="🔄 Зеркала сайтов", callback_data="tool_mirrors")
     b.button(text="🔧 DNS-настройки",  callback_data="tool_dns")
@@ -36,6 +40,13 @@ def kb_tools() -> InlineKeyboardMarkup:
     b.adjust(2, 2, 1)
     return b.as_markup()
 
+
+def kb_vpn_cliients() -> InlineKeyboardMarkup:
+    b = InlineKeyboardBuilder()
+    b.button(text="🌍 Hiddify",         callback_data="tool_proxy")
+    b.button(text="◀️ Назад",           callback_data="menu_main")
+    b.adjust(2, 2, 1)
+    return b.as_markup()
 
 def kb_guides() -> InlineKeyboardMarkup:
     b = InlineKeyboardBuilder()

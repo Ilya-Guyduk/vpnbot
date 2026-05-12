@@ -15,6 +15,7 @@ from aiogram.types import (
     Message,
     PreCheckoutQuery,
 )
+from aiogram.exceptions import TelegramBadRequest
 
 from config import VPN_PLANS, ADMIN_IDS
 from database import db
@@ -54,30 +55,49 @@ async def cb_buy_vpn(callback: CallbackQuery, bot: Bot) -> None:
 
     plan = VPN_PLANS[plan_id]
 
-    # Создаём заказ заранее, чтобы иметь order_id для payload
     order_id = db.create_order(
         user_id=callback.from_user.id,
         amount_stars=plan["price_stars"],
         duration_days=plan["duration"],
     )
-    logger.info(f"send_invoice plan_id:{plan_id}, plan{plan}, order_id:{order_id}, price:{LabeledPrice(label=plan["name"], amount=plan["price_stars"])}")
 
-    await bot.send_invoice(
-        chat_id=callback.from_user.id,
-        title=plan["name"],
-        description="VPN-подписка для обхода цензуры",
-        payload=_make_payload(plan_id, order_id),
-        currency="XTR",          # Telegram Stars — без provider_token
-        prices=[LabeledPrice(label=plan["name"], amount=plan["price_stars"])],
+    logger.info(
+        "send_invoice → plan=%s order_id=%s stars=%s",
+        plan_id, order_id, plan["price_stars"],
     )
-    await callback.answer("⭐ Счёт отправлен")
+
+    try:
+        await bot.send_invoice(
+            chat_id=callback.from_user.id,
+            title=plan["name"],
+            description="VPN-подписка для обхода цензуры",
+            payload=_make_payload(plan_id, order_id),
+            currency="XTR",
+            prices=[LabeledPrice(label=plan["name"], amount=plan["price_stars"])],
+        )
+        await callback.answer("⭐ Счёт отправлен")
+
+    except TelegramBadRequest as e:
+        # Детальный лог — помогает понять причину отказа Telegram
+        logger.error(
+            "send_invoice failed: %s\n"
+            "  plan_id=%s order_id=%s stars=%s\n"
+            "  Вероятная причина: бот не подключён к Stars-монетизации в BotFather\n"
+            "  Путь: /mybots → бот → Bot Settings → Payments → Telegram Stars",
+            e, plan_id, order_id, plan["price_stars"],
+        )
+        db.fail_order(order_id)
+        await callback.answer(
+            "⚠️ Оплата временно недоступна. Свяжитесь с поддержкой: @support",
+            show_alert=True,
+        )
 
 
 # ── 2. Pre-checkout ──────────────────────────────────────────────────────────
 
 @router.pre_checkout_query()
 async def cb_pre_checkout(pre_checkout: PreCheckoutQuery, bot: Bot) -> None:
-    logger.debug(f"cb_pre_checkout()")
+    logger.info("pre_checkout_query payload=%s", pre_checkout.invoice_payload)
     plan_id, order_id = _parse_payload(pre_checkout.invoice_payload)
 
     if plan_id is None or plan_id not in VPN_PLANS:
@@ -97,6 +117,13 @@ async def cb_pre_checkout(pre_checkout: PreCheckoutQuery, bot: Bot) -> None:
 async def cb_successful_payment(message: Message, bot: Bot) -> None:
     payment = message.successful_payment
     plan_id, order_id = _parse_payload(payment.invoice_payload)
+
+    logger.info(
+        "successful_payment payload=%s charge_id=%s stars=%s",
+        payment.invoice_payload,
+        payment.telegram_payment_charge_id,
+        payment.total_amount,
+    )
 
     if plan_id is None or plan_id not in VPN_PLANS:
         logger.error(
@@ -118,7 +145,6 @@ async def cb_successful_payment(message: Message, bot: Bot) -> None:
 
     plan = VPN_PLANS[plan_id]
 
-    # Сообщаем пользователю, что идёт настройка (может занять время)
     wait_msg = await message.answer(
         "⏳ Оплата получена! Настраиваем ваш VPN-сервер — займёт до 2 минут..."
     )
@@ -133,7 +159,6 @@ async def cb_successful_payment(message: Message, bot: Bot) -> None:
             duration_days=plan["duration"],
             user_id=message.from_user.id,
         )
-
         await wait_msg.delete()
         await message.answer(
             f"✅ <b>Ваш VPN готов!</b>\n\n"
@@ -143,7 +168,6 @@ async def cb_successful_payment(message: Message, bot: Bot) -> None:
             f"По вопросам: @support",
             reply_markup=kb_main(),
         )
-
         await _notify_admins(
             bot,
             f"💰 Новая продажа (Stars)\n"
