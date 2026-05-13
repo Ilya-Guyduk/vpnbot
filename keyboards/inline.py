@@ -6,7 +6,7 @@ from data.articles import ARTICLES
 
 def kb_main() -> InlineKeyboardMarkup:
     b = InlineKeyboardBuilder()
-    b.button(text="🔒 VPN-сервисы",       callback_data="menu_vpn")
+    b.button(text="🔒 Black List VPN",       callback_data="menu_vpn")
     b.button(text="🛠 Софт",               callback_data="menu_tools")
     b.button(text="🛠 Настройки ПО",       callback_data="menu_tools")
     b.button(text="🛠 Полезные ссылки",    callback_data="menu_tools")
@@ -20,7 +20,7 @@ def kb_vpn_plans() -> InlineKeyboardMarkup:
     b = InlineKeyboardBuilder()
     for plan_id, plan in VPN_PLANS.items():
         b.button(
-            text=f"{plan['name']} — ⭐ {plan['price_stars']}",
+            text=f"{plan['name']} — ⭐ {plan['price']}",
             callback_data=f"buy_vpn_{plan_id}",
         )
     b.button(text="◀️ Назад", callback_data="menu_main")
