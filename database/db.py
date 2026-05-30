@@ -136,7 +136,7 @@ def get_active_subscription(user_id: int) -> sqlite3.Row | None:
             """SELECT o.vpn_config, o.duration_days, u.subscription_end
                FROM orders o JOIN users u ON o.user_id = u.user_id
                WHERE o.user_id=? AND o.status='paid'
-               ORDER BY o.id DESC LIMIT 1""",
+               ORDER BY o.id DESC""",
             (user_id,),
         ).fetchone()
 

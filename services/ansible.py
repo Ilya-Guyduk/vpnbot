@@ -25,6 +25,7 @@ async def provision_vpn_user(user_id: int, duration_days: int) -> str | None:
     output_dir.mkdir(parents=True, exist_ok=True)
     config_path = output_dir / f"user_{user_id}.conf"
 
+    logging.info(f"output_dir: {output_dir}, config_path: {config_path}")
     # Удаляем старый файл, чтобы не вернуть устаревший конфиг
     if config_path.exists():
         config_path.unlink()

@@ -1,0 +1,13 @@
+---
+galaxy_info:
+  role_name: xray
+  author: ops
+  description: "Xray-core VPN — VLESS + Reality (наиболее устойчивая конфигурация)"
+  min_ansible_version: "2.12"
+  platforms:
+    - name: Ubuntu
+      versions: ["20.04", "22.04", "24.04"]
+    - name: Debian
+      versions: ["11", "12"]
+
+dependencies: []

@@ -1,0 +1,15 @@
+---
+- name: restart xray
+  ansible.builtin.systemd:
+    name: xray
+    state: restarted
+    daemon_reload: true
+
+- name: reload xray
+  ansible.builtin.systemd:
+    name: xray
+    state: reloaded
+
+- name: apply sysctl
+  ansible.builtin.command: sysctl --system
+  changed_when: false

@@ -5,9 +5,9 @@ from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 
-from config import BOT_TOKEN, CRYPTO_BOT_TOKEN
+from config import BOT_TOKEN, CRYPTO_BOT_TOKEN, MAIN_MENU_ENABLED, ADMIN_MENU_ENABLED, INLINE_MODE_ENABLED
 from database.db import init_db
-from handlers import admin, guides, inline_git, menu, payment, tools
+from handlers import admin, inline_git, menu
 from services.cryptobot import check_app
 from services.poller import payment_poller
 
@@ -20,12 +20,12 @@ logger = logging.getLogger(__name__)
 
 def create_dispatcher() -> Dispatcher:
     dp = Dispatcher()
-    dp.include_router(menu.router)
-    dp.include_router(tools.router)
-    dp.include_router(guides.router)
-    dp.include_router(payment.router)
-    dp.include_router(inline_git.router)
-    dp.include_router(admin.router)
+    if MAIN_MENU_ENABLED:
+        dp.include_router(menu.router)
+    if ADMIN_MENU_ENABLED:
+        dp.include_router(admin.router)
+    if INLINE_MODE_ENABLED:
+        dp.include_router(inline_git.router)
     return dp
 
 

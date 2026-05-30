@@ -1,0 +1,197 @@
+---
+# ============================================================
+#  Генерация ключей Reality и UUID клиентов
+#  Идемпотентно: сгенерированные значения сохраняются на сервере
+# ============================================================
+
+- name: Check if Reality keys already exist
+  ansible.builtin.stat:
+    path: "{{ xray_config_dir }}/.reality_keys"
+  register: reality_keys_file
+
+# --- Reality keypair ---
+# Используем `xray x25519 -i <private_key>` для получения публичного ключа
+# Новые версии xray x25519 выдают: PrivateKey / Password / Hash32 (без PublicKey напрямую)
+# Поэтому: генерируем приватный ключ через openssl, публичный — через xray x25519 -i
+
+- name: Generate x25519 private key via openssl
+  ansible.builtin.shell: |
+    openssl genpkey -algorithm X25519 2>/dev/null \
+      | openssl pkey -outform DER 2>/dev/null \
+      | tail -c 32 \
+      | base64 | tr '+/' '-_' | tr -d '='
+  register: xray_raw_privkey
+  changed_when: true
+  when:
+    - not reality_keys_file.stat.exists
+    - xray_private_key == ""
+
+- name: Derive public key via xray x25519 -i
+  ansible.builtin.shell: |
+    "{{ xray_install_dir }}/xray" x25519 -i "{{ xray_raw_privkey.stdout | trim }}" 2>/dev/null
+  register: xray_keygen_output
+  changed_when: false
+  when:
+    - not reality_keys_file.stat.exists
+    - xray_private_key == ""
+
+- name: Debug keygen output
+  ansible.builtin.debug:
+    msg: "xray x25519 -i output:\n{{ xray_keygen_output.stdout }}"
+  when:
+    - not reality_keys_file.stat.exists
+    - xray_private_key == ""
+
+# xray x25519 -i выдаёт:
+#   PrivateKey: <key>
+#   PublicKey:  <key>   (или Password: в старых форматах)
+# Ищем строку содержащую PublicKey ИЛИ Password (второй вариант — это и есть pubkey в старом формате)
+- name: Parse private key from output
+  ansible.builtin.set_fact:
+    _xray_private_key: "{{ xray_keygen_output.stdout_lines
+      | select('match', '(?i)private')
+      | first
+      | regex_replace('.*:\\s*', '')
+      | trim }}"
+  when:
+    - not reality_keys_file.stat.exists
+    - xray_private_key == ""
+
+- name: Parse public key from output (PublicKey line)
+  ansible.builtin.set_fact:
+    _xray_public_key: "{{ xray_keygen_output.stdout_lines
+      | select('match', '(?i)public')
+      | first
+      | regex_replace('.*:\\s*', '')
+      | trim }}"
+  when:
+    - not reality_keys_file.stat.exists
+    - xray_private_key == ""
+    - xray_keygen_output.stdout_lines | select('match', '(?i)public') | list | length > 0
+
+# Fallback: если нет строки PublicKey — берём Password (это pubkey в формате xray >=25)
+- name: Parse public key from output (Password fallback)
+  ansible.builtin.set_fact:
+    _xray_public_key: "{{ xray_keygen_output.stdout_lines
+      | select('match', '(?i)password')
+      | first
+      | regex_replace('.*:\\s*', '')
+      | trim }}"
+  when:
+    - not reality_keys_file.stat.exists
+    - xray_private_key == ""
+    - xray_keygen_output.stdout_lines | select('match', '(?i)public') | list | length == 0
+    - xray_keygen_output.stdout_lines | select('match', '(?i)password') | list | length > 0
+
+- name: Use manually provided keys
+  ansible.builtin.set_fact:
+    _xray_private_key: "{{ xray_private_key }}"
+    _xray_public_key:  "{{ xray_public_key }}"
+  when: xray_private_key != ""
+
+- name: Assert keys are parsed
+  ansible.builtin.assert:
+    that:
+      - _xray_private_key is defined
+      - _xray_private_key | length > 10
+      - _xray_public_key is defined
+      - _xray_public_key | length > 10
+    fail_msg: |
+      Не удалось разобрать ключи Reality!
+      Вывод xray x25519: {{ xray_keygen_output.stdout | default('(пусто)') }}
+  when: not reality_keys_file.stat.exists
+
+- name: Save Reality keys to file (для идемпотентности)
+  ansible.builtin.copy:
+    content: |
+      private_key={{ _xray_private_key }}
+      public_key={{ _xray_public_key }}
+    dest: "{{ xray_config_dir }}/.reality_keys"
+    owner: root
+    group: root
+    mode: '0600'
+  when: not reality_keys_file.stat.exists
+
+- name: Load existing Reality keys
+  ansible.builtin.slurp:
+    src: "{{ xray_config_dir }}/.reality_keys"
+  register: reality_keys_raw
+  when: reality_keys_file.stat.exists
+
+- name: Parse existing Reality keys
+  ansible.builtin.set_fact:
+    _xray_private_key: "{{ (reality_keys_raw.content | b64decode).split('\n')
+      | select('match', 'private_key=')
+      | first
+      | regex_replace('private_key=', '')
+      | trim }}"
+    _xray_public_key: "{{ (reality_keys_raw.content | b64decode).split('\n')
+      | select('match', 'public_key=')
+      | first
+      | regex_replace('public_key=', '')
+      | trim }}"
+  when: reality_keys_file.stat.exists
+
+# --- UUID для каждого клиента ---
+
+- name: Check existing client UUIDs
+  ansible.builtin.stat:
+    path: "{{ xray_config_dir }}/.client_{{ item.name }}.uuid"
+  register: client_uuid_files
+  loop: "{{ xray_clients }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: Generate UUIDs for new clients
+  ansible.builtin.command: "{{ xray_install_dir }}/xray uuid"
+  register: generated_uuids
+  changed_when: true
+  loop: "{{ xray_clients }}"
+  loop_control:
+    index_var: idx
+    label: "{{ item.name }}"
+  when:
+    - item.uuid == ""
+    - not client_uuid_files.results[idx].stat.exists
+
+- name: Save generated UUIDs
+  ansible.builtin.copy:
+    content: "{{ generated_uuids.results[idx].stdout | trim }}"
+    dest: "{{ xray_config_dir }}/.client_{{ item.name }}.uuid"
+    owner: root
+    group: root
+    mode: '0600'
+  loop: "{{ xray_clients }}"
+  loop_control:
+    index_var: idx
+    label: "{{ item.name }}"
+  when:
+    - item.uuid == ""
+    - not client_uuid_files.results[idx].stat.exists
+
+- name: Load all client UUIDs
+  ansible.builtin.slurp:
+    src: "{{ xray_config_dir }}/.client_{{ item.name }}.uuid"
+  register: client_uuid_slurps
+  loop: "{{ xray_clients }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: Build resolved clients list
+  ansible.builtin.set_fact:
+    xray_resolved_clients: >-
+      {{
+        xray_resolved_clients | default([]) + [{
+          'name':  item.name,
+          'uuid':  (item.uuid != '') | ternary(
+                     item.uuid,
+                     client_uuid_slurps.results[idx].content | b64decode | trim
+                   ),
+          'flow':  item.flow,
+          'email': item.email
+        }]
+      }}
+  loop: "{{ xray_clients }}"
+  loop_control:
+    index_var: idx
+    label: "{{ item.name }}"

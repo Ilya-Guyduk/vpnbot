@@ -1,0 +1,76 @@
+#!/usr/bin/env bash
+# /usr/local/bin/xray-update.sh
+# Автообновление xray-core
+# Управляется через Ansible — не редактировать вручную
+
+set -euo pipefail
+
+XRAY_BIN="{{ xray_install_dir }}/xray"
+XRAY_CONFIG="{{ xray_config_dir }}/config.json"
+LOG_TAG="xray-update"
+
+log() { logger -t "${LOG_TAG}" "$*"; echo "[$(date -Iseconds)] $*"; }
+
+# Текущая версия
+CURRENT_VERSION=$(${XRAY_BIN} version 2>/dev/null | grep -oP 'Xray \K[\d.]+' | head -1 || echo "unknown")
+log "Текущая версия: ${CURRENT_VERSION}"
+
+# Последняя версия с GitHub
+LATEST_TAG=$(curl -fsSL https://api.github.com/repos/XTLS/Xray-core/releases/latest \
+  | grep '"tag_name"' | head -1 | grep -oP '"v[^"]+"' | tr -d '"')
+LATEST_VERSION="${LATEST_TAG#v}"
+
+if [ "${CURRENT_VERSION}" = "${LATEST_VERSION}" ]; then
+  log "Обновление не требуется (${CURRENT_VERSION})"
+  exit 0
+fi
+
+log "Обновляем ${CURRENT_VERSION} → ${LATEST_VERSION}"
+
+# Определить архитектуру
+ARCH=$(uname -m)
+case "${ARCH}" in
+  x86_64)  XRAY_ARCH="linux-64" ;;
+  aarch64) XRAY_ARCH="arm64-v8a" ;;
+  armv7l)  XRAY_ARCH="arm32-v7a" ;;
+  *)       log "Неизвестная архитектура: ${ARCH}"; exit 1 ;;
+esac
+
+# Скачать
+TMP_DIR=$(mktemp -d)
+trap 'rm -rf "${TMP_DIR}"' EXIT
+
+DOWNLOAD_URL="https://github.com/XTLS/Xray-core/releases/download/${LATEST_TAG}/Xray-${XRAY_ARCH}.zip"
+log "Загрузка: ${DOWNLOAD_URL}"
+curl -fsSL -o "${TMP_DIR}/xray.zip" "${DOWNLOAD_URL}"
+
+unzip -q "${TMP_DIR}/xray.zip" -d "${TMP_DIR}/xray"
+
+# Проверить новый бинарник
+chmod +x "${TMP_DIR}/xray/xray"
+NEW_VERSION=$("${TMP_DIR}/xray/xray" version | grep -oP 'Xray \K[\d.]+' | head -1)
+log "Версия нового бинарника: ${NEW_VERSION}"
+
+# Проверить совместимость конфига с новой версией
+if ! "${TMP_DIR}/xray/xray" run -test -config "${XRAY_CONFIG}" &>/dev/null; then
+  log "ОШИБКА: новая версия не прошла тест конфига. Откат."
+  exit 2
+fi
+
+# Установить
+cp "${XRAY_BIN}" "${XRAY_BIN}.bak"
+cp "${TMP_DIR}/xray/xray" "${XRAY_BIN}"
+
+# Перезапустить
+systemctl restart xray
+sleep 3
+
+if systemctl is-active --quiet xray; then
+  log "Обновление успешно: ${LATEST_VERSION}"
+  rm -f "${XRAY_BIN}.bak"
+else
+  log "ОШИБКА запуска после обновления. Откат на ${CURRENT_VERSION}"
+  cp "${XRAY_BIN}.bak" "${XRAY_BIN}"
+  systemctl restart xray
+  exit 3
+fi

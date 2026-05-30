@@ -1,0 +1,84 @@
+---
+# ============================================================
+#  Генерация конфигов клиентов и QR-кодов
+# ============================================================
+
+- name: Get server public IP
+  ansible.builtin.uri:
+    url: https://api.ipify.org?format=json
+    return_content: true
+    timeout: 10
+  register: public_ip_result
+  ignore_errors: true
+
+- name: Set server IP fact
+  ansible.builtin.set_fact:
+    xray_server_ip: >-
+      {{
+        public_ip_result.json.ip
+        if not public_ip_result.failed
+        else ansible_default_ipv4.address
+      }}
+
+- name: Ensure QR output directory exists
+  ansible.builtin.file:
+    path: "{{ xray_qr_output_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: '0700'
+
+- name: Generate VLESS URI and QR for each client
+  ansible.builtin.shell: |
+    UUID="{{ item.uuid }}"
+    NAME="{{ item.name }}"
+    VLESS_URI="vless://${UUID}@{{ xray_server_ip }}:{{ xray_port }}\
+    ?encryption=none\
+    &flow={{ item.flow }}\
+    &security=reality\
+    &sni={{ xray_reality_server_name }}\
+    &fp={{ xray_fingerprint }}\
+    &pbk={{ _xray_public_key }}\
+    &sid={{ xray_short_ids[0] }}\
+    &type=tcp\
+    &headerType=none\
+    #{{ item.name | urlencode }}"
+
+    # Сохранить URI
+    echo "${VLESS_URI}" > "{{ xray_qr_output_dir }}/${NAME}.uri"
+
+    # Сгенерировать QR-код
+    {% if xray_generate_qr %}
+    echo "${VLESS_URI}" | qrencode -t UTF8 -o "{{ xray_qr_output_dir }}/${NAME}.png" 2>/dev/null || true
+    echo "${VLESS_URI}" | qrencode -t ANSIUTF8 > "{{ xray_qr_output_dir }}/${NAME}_qr.txt" 2>/dev/null || true
+    {% endif %}
+
+    echo "OK: ${NAME}"
+  args:
+    executable: /bin/bash
+  register: client_gen
+  loop: "{{ xray_resolved_clients }}"
+  loop_control:
+    label: "{{ item.name }}"
+  changed_when: true
+
+- name: Print client connection info
+  ansible.builtin.debug:
+    msg: |
+      ============================================================
+      Клиент: {{ item.item.name }}
+      UUID:   {{ item.item.uuid }}
+      Сервер: {{ xray_server_ip }}:{{ xray_port }}
+      
+      VLESS URI сохранён в:
+        {{ xray_qr_output_dir }}/{{ item.item.name }}.uri
+      QR-код (PNG):
+        {{ xray_qr_output_dir }}/{{ item.item.name }}.png
+      QR-код (терминал):
+        {{ xray_qr_output_dir }}/{{ item.item.name }}_qr.txt
+      
+      Public key Reality: {{ _xray_public_key }}
+      ============================================================
+  loop: "{{ client_gen.results }}"
+  loop_control:
+    label: "{{ item.item.name }}"

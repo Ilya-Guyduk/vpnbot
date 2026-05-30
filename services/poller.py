@@ -9,7 +9,7 @@ from aiogram import Bot
 
 from database import db
 from services.cryptobot import get_invoices
-from handlers.payment import _deliver_vpn
+from handlers.vpn.payment import _deliver_vpn
 
 logger = logging.getLogger(__name__)
 

@@ -1,0 +1,39 @@
+---
+- name: Install dependencies
+  ansible.builtin.import_tasks: deps.yml
+  tags: [xray, deps]
+
+- name: System tuning (BBR + sysctl)
+  ansible.builtin.import_tasks: sysctl.yml
+  tags: [xray, sysctl]
+  when: xray_sysctl_tuning | bool
+
+- name: Install xray-core
+  ansible.builtin.import_tasks: install.yml
+  tags: [xray, install]
+
+- name: Generate keys and UUIDs
+  ansible.builtin.import_tasks: keys.yml
+  tags: [xray, keys, config]
+
+- name: Configure xray
+  ansible.builtin.import_tasks: config.yml
+  tags: [xray, config]
+
+- name: Configure systemd service
+  ansible.builtin.import_tasks: service.yml
+  tags: [xray, service]
+
+- name: Setup auto-update
+  ansible.builtin.import_tasks: autoupdate.yml
+  tags: [xray, autoupdate]
+  when: xray_autoupdate_enabled | bool
+
+- name: Generate client configs and QR codes
+  ansible.builtin.import_tasks: clients.yml
+  tags: [xray, clients]
+
+- name: Setup NAT tunnel (bore.pub) for testing
+  ansible.builtin.import_tasks: tunnel.yml
+  tags: [xray, tunnel]
+  when: xray_tunnel_enabled | bool

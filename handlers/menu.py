@@ -6,31 +6,51 @@ from datetime import datetime
 from aiogram import Router, F
 from aiogram.filters import Command
 from aiogram.types import Message, CallbackQuery
-from aiogram.exceptions import TelegramBadRequest
 
+from config import SOFTWARE_MENU_ENABLED, VPN_MENU_ENABLED, GUIDES_MENU_ENABLED, SETTINGS_MENU_ENABLED, LINKS_MENU_ENABLED, BOTS_MENU_ENABLED, MIRRORS_MENU_ENABLED, HELP_MENU_ENABLED
 from database.db import register_user, get_active_subscription
-from keyboards.inline import kb_main, kb_vpn_plans, kb_guides, kb_back_main
+from keyboards.inline import kb_main
+
+from handlers.vpn import menu as vpn
+from handlers.software import menu as software
+from handlers.guides import menu as guides
+from handlers.help import menu as help
+from handlers.settings import menu as settings
+
+from handlers.utils import safe_edit
+from data.quotes import random_quote
 
 logger = logging.getLogger(__name__)
 router = Router()
 
+if VPN_MENU_ENABLED:
+    router.include_router(vpn.router)
+if SOFTWARE_MENU_ENABLED:
+    router.include_router(software.router)
+if GUIDES_MENU_ENABLED:
+    router.include_router(guides.router)
+if SETTINGS_MENU_ENABLED:
+    router.include_router(settings.router)
+if LINKS_MENU_ENABLED:
+    router.include_router(links.router)
+if BOTS_MENU_ENABLED:
+    router.include_router(bots.router)
+if MIRRORS_MENU_ENABLED:
+    router.include_router(mirrors.router)
+if HELP_MENU_ENABLED:
+    router.include_router(help.router)
 
 # ── Тексты ───────────────────────────────────────────────────────────────────
 
 def _welcome_text(first_name: str) -> str:
+    quote, author = random_quote()
     return (
         f"👤 <b>{first_name}.</b>\n\n"
-        "Связь установлена. Добро пожаловать в <b>Black List</b>.\n\n"
-        "Министерство правды контролирует то, что ты видишь.\n"
-        "Мы контролируем то, что они не хотят, чтобы ты видел.\n\n"
+        "Добро пожаловать в <b>Black List</b>.\n\n"
+        f"<i>«{quote}»</i>\n"
+        f"<b>— {author}</b>\n\n"
         "——————————————————\n"
-        "  🔒 <b>Black List VPN</b> — туннель сквозь Стену\n"
-        "  📦 <b>Арсенал</b> — софт, который они хотят запретить\n"
-        "  ⚙️ <b>DNS</b> — обойти блокировку за 5 минут\n"
-        "  🌍 <b>Прокси</b> — анонимность без следов\n"
-        "  📖 <b>Инструкции</b> — пошагово для любой платформы\n"
-        "——————————————————\n\n"
-        "Выбери раздел. Время работает против нас."
+        "Выбери раздел:"
     )
 
 
@@ -43,62 +63,18 @@ def _welcome_text_with_sub(first_name: str, sub_end: datetime) -> str:
     else:
         status = "🔴 Истёк — ты снова за Стеной"
 
+    quote, author = random_quote()
     return (
-        f"👤 <b>{first_name}.</b> Связь восстановлена.\n\n"
+        f"👤 <b>Приветствуем, {first_name}.</b>\n\n"
         f"📡 <b>Статус туннеля:</b> {status}\n\n"
+        f"<i>«{quote}»</i>\n"
+        f"<b>— {author}</b>\n\n"
         "——————————————————\n"
         "Выбери раздел:"
     )
 
 
-_VPN_TEXT = (
-    "🔒 <b>Black List VPN</b>\n\n"
-    "Они называют это «регулированием».\n"
-    "Мы называем это тем, чем это является.\n\n"
-    "Выбери тариф — после оплаты сервер поднимется автоматически. "
-    "Никаких анкет, никаких имён.\n\n"
-    "⚡ Активация: <b>~60 секунд</b>\n"
-    "🌍 Серверы вне юрисдикции РКН\n"
-    "🔑 Один ключ — все устройства\n"
-    "👁 Логи не ведутся"
-)
-
-_GUIDES_TEXT = (
-    "📖 <b>Инструкции</b>\n\n"
-    "Знание — оружие. Здесь оно бесплатно.\n\n"
-    "Пошаговые руководства со скриншотами.\n"
-    "Выбери платформу:"
-)
-
-_HELP_TEXT = (
-    "❓ <b>Как это работает</b>\n\n"
-    "<b>Получить туннель (VPN):</b>\n"
-    "  1. Раздел «Black List VPN» → выбери тариф\n"
-    "  2. Оплати криптой через CryptoBot\n"
-    "  3. Получи конфиг — готово\n\n"
-    "<b>Бесплатные инструменты:</b>\n"
-    "  → Прокси, DNS, Tor — без регистрации\n\n"
-    "<b>Подключение:</b>\n"
-    "  → Раздел «Инструкции»\n\n"
-    "——————————————————\n"
-    "💬 Связь с оператором: @support\n"
-    "⏱ Ответ: до 2 часов\n\n"
-    "<i>Если бот недоступен — нас заблокировали.\n"
-    "Резервный контакт: @blacklist_reserve</i>"
-)
-
-
 # ── Утилиты ──────────────────────────────────────────────────────────────────
-
-async def _safe_edit(callback: CallbackQuery, text: str, **kwargs) -> None:
-    try:
-        await callback.message.edit_text(text, **kwargs)
-    except TelegramBadRequest as e:
-        if "message is not modified" not in str(e):
-            logger.warning("edit_text failed: %s", e)
-    finally:
-        await callback.answer()
-
 
 def _get_welcome(user_id: int, first_name: str) -> str:
     row = get_active_subscription(user_id)
@@ -131,19 +107,4 @@ async def cmd_start(message: Message) -> None:
 async def cb_main(callback: CallbackQuery) -> None:
     first_name = callback.from_user.first_name or "агент"
     text = _get_welcome(callback.from_user.id, first_name)
-    await _safe_edit(callback, text, reply_markup=kb_main())
-
-
-@router.callback_query(F.data == "menu_vpn")
-async def cb_vpn(callback: CallbackQuery) -> None:
-    await _safe_edit(callback, _VPN_TEXT, reply_markup=kb_vpn_plans())
-
-
-@router.callback_query(F.data == "menu_guides")
-async def cb_guides(callback: CallbackQuery) -> None:
-    await _safe_edit(callback, _GUIDES_TEXT, reply_markup=kb_guides())
-
-
-@router.callback_query(F.data == "menu_help")
-async def cb_help(callback: CallbackQuery) -> None:
-    await _safe_edit(callback, _HELP_TEXT, reply_markup=kb_back_main())
+    await safe_edit(callback, text, reply_markup=kb_main())

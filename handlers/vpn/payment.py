@@ -182,7 +182,12 @@ async def _deliver_vpn(bot: Bot, user_id: int, order_id: int, order_row, inv) ->
     vpn_config = await provision_vpn_user(user_id, plan["duration"])
 
     if vpn_config:
-        db.complete_order(order_id, vpn_config, plan["duration"], user_id)
+        full = plan["duration"]
+        row = db.get_active_subscription(user_id)
+        if row and row["subscription_end"]:
+            full = row["subscription_end"] + plan["duration"]
+
+        db.complete_order(order_id, vpn_config, full, user_id)
         await wait_msg.delete()
         await bot.send_message(
             user_id,
