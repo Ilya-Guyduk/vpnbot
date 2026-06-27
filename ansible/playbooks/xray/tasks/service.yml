@@ -1,0 +1,35 @@
+---
+# ============================================================
+#  Systemd unit для xray
+# ============================================================
+
+- name: Deploy xray systemd service
+  ansible.builtin.template:
+    src: xray.service.j2
+    dest: /etc/systemd/system/xray.service
+    owner: root
+    group: root
+    mode: '0644'
+  notify:
+    - restart xray
+
+- name: Enable and start xray
+  ansible.builtin.systemd:
+    name: xray
+    enabled: true
+    state: started
+    daemon_reload: true
+
+- name: Wait for xray to be running
+  ansible.builtin.systemd:
+    name: xray
+  register: xray_service_status
+  until: xray_service_status.status.ActiveState == "active"
+  retries: 5
+  delay: 3
+
+- name: Check xray is listening on port {{ xray_port }}
+  ansible.builtin.wait_for:
+    port: "{{ xray_port }}"
+    timeout: 15
+    msg: "Xray не слушает порт {{ xray_port }}"

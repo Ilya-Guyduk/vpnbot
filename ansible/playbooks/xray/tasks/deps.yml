@@ -1,0 +1,106 @@
+---
+# ============================================================
+#  Зависимости — устойчиво работает в контейнерах
+# ============================================================
+
+- name: Update apt cache
+  ansible.builtin.apt:
+    update_cache: true
+    cache_valid_time: 3600
+  when: ansible_pkg_mgr == 'apt'
+
+# Пробуем включить universe (Ubuntu) — в контейнерах он часто отключён
+- name: Enable universe repository (Ubuntu)
+  ansible.builtin.apt_repository:
+    repo: "deb http://archive.ubuntu.com/ubuntu {{ ansible_distribution_release }} universe"
+    state: present
+    update_cache: true
+  when:
+    - ansible_pkg_mgr == 'apt'
+    - ansible_distribution == 'Ubuntu'
+  ignore_errors: true
+
+# Ставим пакеты по одному чтобы не падать на первом отсутствующем
+- name: Install core packages (apt)
+  ansible.builtin.apt:
+    name: "{{ item }}"
+    state: present
+    install_recommends: false
+  loop:
+    - curl
+    - wget
+    - ca-certificates
+    - openssl
+  when: ansible_pkg_mgr == 'apt'
+
+- name: Install optional packages (apt) — пропускаем если недоступны
+  ansible.builtin.apt:
+    name: "{{ item }}"
+    state: present
+    install_recommends: false
+  loop:
+    - unzip
+    - jq
+    - qrencode
+  when: ansible_pkg_mgr == 'apt'
+  ignore_errors: true
+  register: optional_pkgs
+
+- name: Report skipped optional packages
+  ansible.builtin.debug:
+    msg: "Пакет '{{ item.item }}' недоступен в репозиториях — пропускаем"
+  loop: "{{ optional_pkgs.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+  when: item.failed | default(false)
+
+# Если unzip недоступен через apt — пробуем установить python3-zipfile или скачать бинарник
+- name: Check if unzip is available
+  ansible.builtin.command: which unzip
+  register: unzip_check
+  changed_when: false
+  failed_when: false
+
+- name: Install unzip from static binary if apt failed
+  ansible.builtin.shell: |
+    curl -fsSL https://github.com/nicowillis/unzip-static/releases/download/v6.0/unzip-linux-amd64 \
+      -o /usr/local/bin/unzip && chmod +x /usr/local/bin/unzip
+  when: unzip_check.rc != 0
+  ignore_errors: true
+
+# Fallback: распаковываем через Python если unzip всё равно нет
+- name: Check unzip availability after install attempts
+  ansible.builtin.command: which unzip
+  register: unzip_final_check
+  changed_when: false
+  failed_when: false
+
+- name: Set unzip method fact
+  ansible.builtin.set_fact:
+    xray_use_python_unzip: "{{ unzip_final_check.rc != 0 }}"
+
+- name: Install required packages (yum/dnf)
+  ansible.builtin.package:
+    name:
+      - curl
+      - wget
+      - unzip
+      - jq
+      - qrencode
+      - ca-certificates
+      - openssl
+    state: present
+  when: ansible_pkg_mgr in ['yum', 'dnf']
+  ignore_errors: true
+
+- name: Create xray directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+  loop:
+    - "{{ xray_config_dir }}"
+    - "{{ xray_log_dir }}"
+    - "{{ xray_qr_output_dir }}"

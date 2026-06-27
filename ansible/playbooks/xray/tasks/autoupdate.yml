@@ -1,0 +1,54 @@
+---
+# ============================================================
+#  Автообновление xray через systemd timer
+# ============================================================
+
+- name: Deploy xray-update script
+  ansible.builtin.template:
+    src: xray-update.sh.j2
+    dest: /usr/local/bin/xray-update.sh
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: Deploy xray-update systemd service unit
+  ansible.builtin.copy:
+    content: |
+      [Unit]
+      Description=Xray-core auto-update
+      After=network-online.target
+
+      [Service]
+      Type=oneshot
+      ExecStart=/usr/local/bin/xray-update.sh
+      StandardOutput=journal
+      StandardError=journal
+    dest: /etc/systemd/system/xray-update.service
+    owner: root
+    group: root
+    mode: '0644'
+
+- name: Deploy xray-update systemd timer unit
+  ansible.builtin.copy:
+    content: |
+      [Unit]
+      Description=Weekly xray-core auto-update
+
+      [Timer]
+      OnCalendar={{ xray_autoupdate_schedule }}
+      Persistent=true
+      RandomizedDelaySec=1800
+
+      [Install]
+      WantedBy=timers.target
+    dest: /etc/systemd/system/xray-update.timer
+    owner: root
+    group: root
+    mode: '0644'
+
+- name: Enable and start xray-update timer
+  ansible.builtin.systemd:
+    name: xray-update.timer
+    enabled: true
+    state: started
+    daemon_reload: true
