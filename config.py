@@ -29,6 +29,15 @@ CRYPTO_ASSET: str = os.getenv("CRYPTO_ASSET", "USDT")
 # Создать: github.com/settings/tokens → Generate new token (classic) → без скоупов
 GITHUB_TOKEN: str = os.getenv("GITHUB_TOKEN", "")
 
+# -- XUI-API
+XUI_API_URL: str = os.getenv("XUI_API_URL", "")
+XUI_API_USERNAME: str = os.getenv("XUI_API_USERNAME", "")
+XUI_API_PASSWORD: str = os.getenv("XUI_API_PASSWORD", "")
+XUI_API_TOKEN: str = os.getenv("XUI_API_TOKEN", "")
+
+
+
+
 # ── Ansible ───────────────────────────────────────────────────────────────────
 ANSIBLE_PLAYBOOK_PATH: str = os.getenv("ANSIBLE_PLAYBOOK_PATH", "ansible/playbooks/create_vpn_user.yml")
 ANSIBLE_INVENTORY: str    = os.getenv("ANSIBLE_INVENTORY", "ansible/inventory/inventory.yml")

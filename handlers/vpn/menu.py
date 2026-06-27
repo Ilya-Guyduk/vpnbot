@@ -30,7 +30,7 @@ _TUNNEL_TYPE_TEXT = (
 
 @router.callback_query(F.data == "menu_tunnel_type")
 async def cb_vpn(callback: CallbackQuery) -> None:
-    await safe_edit(callback, _TUNNEL_TYPE_TEXT, reply_markup=kb_tunnel_type())
+    await safe_edit(callback, _TUNNEL_TYPE_TEXT, reply_markup=kb_tunnel_type(has_tunnels=True))
 
 @router.callback_query(F.data == "menu_vpn")
 async def cb_vpn(callback: CallbackQuery) -> None:
