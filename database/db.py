@@ -26,6 +26,7 @@ def get_db():
 def init_db() -> None:
     """Инициализация БД"""
     with get_db() as conn:
+        # Создаем таблицу payments
         conn.execute("""
             CREATE TABLE IF NOT EXISTS payments (
                 id                 INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -43,10 +44,26 @@ def init_db() -> None:
             )
         """)
         
-        # Создаем индексы для быстрого поиска
+        # Создаем таблицу tunnel_mappings
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS tunnel_mappings (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                tunnel_email TEXT NOT NULL,
+                sub_id TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(user_id)
+            )
+        """)
+        
+        # Создаем индексы для таблицы payments
         conn.execute("CREATE INDEX IF NOT EXISTS idx_payments_user_id ON payments(user_id)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_payments_status ON payments(status)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_payments_crypto_invoice_id ON payments(crypto_invoice_id)")
+        
+        # Создаем индекс для tunnel_mappings
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_tunnel_mappings_user_id ON tunnel_mappings(user_id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_tunnel_mappings_sub_id ON tunnel_mappings(sub_id)")
         
     logger.info("БД инициализирована")
 
@@ -146,7 +163,7 @@ def expire_old_pending_payments(older_than_hours: int = 2) -> int:
         cur = conn.execute(
             """UPDATE payments 
                SET status = 'expired', updated_at = ? 
-               WHERE status = 'pending' AND created_at < ?""",
+               WHERE status = 'pending' AND created_at > ?""",
             (datetime.now().isoformat(), threshold)
         )
         count = cur.rowcount
@@ -439,3 +456,28 @@ def cleanup_old_payments(days: int = 365) -> int:
         count = cur.rowcount
         logger.info(f"Удалено старых платежей: {count}")
         return count
+    
+
+def save_tunnel_mapping(user_id: int, tunnel_email: str, sub_id: str):
+    """Сохраняет связь между user_id и email туннеля"""
+    with get_db() as conn:
+        conn.execute(
+            """
+            INSERT OR REPLACE INTO tunnel_mappings (user_id, tunnel_email, sub_id, created_at)
+            VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+            """,
+            (user_id, tunnel_email, sub_id)
+        )
+
+
+def get_tunnel_mapping(user_id: int) -> Optional[Dict]:
+    """Получает информацию о туннеле по user_id"""
+    with get_db() as conn:
+        result = conn.execute(
+            "SELECT * FROM tunnel_mappings WHERE user_id = ?",
+            (user_id,)
+        ).fetchone()
+        
+        if result:
+            return dict(result)
+        return None

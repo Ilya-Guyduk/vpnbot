@@ -5,14 +5,15 @@ from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 
-from config import BOT_TOKEN, CRYPTO_BOT_TOKEN, MAIN_MENU_ENABLED, ADMIN_MENU_ENABLED, INLINE_MODE_ENABLED, XUI_API_URL, XUI_API_TOKEN
-from services.xui_panel_api_client.xui_panel_api_client.client import AuthenticatedClient
-from services.xui_panel_api_client.xui_panel_api_client.api.authentication import post_login
+
+from config import BOT_TOKEN, CRYPTO_BOT_TOKEN, MAIN_MENU_ENABLED, ADMIN_MENU_ENABLED, INLINE_MODE_ENABLED, XUI_API_HOST, XUI_API_PATH, XUI_API_TOKEN, XUI_API_PORT, USE_SOCKS5
+from services.xui_client.xui_client.client import AuthenticatedClient
 
 from database.db import init_db
-from handlers import admin, inline_git, menu
+from routers import admin, inline_git, main_menu_router
 from services.cryptobot import check_app
 from services.poller import payment_poller
+from services.poller import router as payment_router
 
 logging.basicConfig(
     level=logging.DEBUG,
@@ -23,8 +24,9 @@ logger = logging.getLogger(__name__)
 
 def create_dispatcher() -> Dispatcher:
     dp = Dispatcher()
+    dp.include_router(payment_router)
     if MAIN_MENU_ENABLED:
-        dp.include_router(menu.router)
+        dp.include_router(main_menu_router)
     if ADMIN_MENU_ENABLED:
         dp.include_router(admin.router)
     if INLINE_MODE_ENABLED:
@@ -33,13 +35,24 @@ def create_dispatcher() -> Dispatcher:
 
 
 async def main() -> None:
-    xui_client = AuthenticatedClient(base_url=XUI_API_URL, token=XUI_API_TOKEN, verify_ssl=True)
+    xui_client = AuthenticatedClient(base_url=XUI_API_HOST+":"+XUI_API_PORT+XUI_API_PATH, token=XUI_API_TOKEN, verify_ssl=True)
     init_db()
 
-    bot = Bot(
-        token=BOT_TOKEN,
-        default=DefaultBotProperties(parse_mode=ParseMode.HTML),
-    )
+    if USE_SOCKS5:
+        from aiogram.client.session.aiohttp import AiohttpSession
+        PROXY_URL = "socks5://127.0.0.1:9999"
+        session = AiohttpSession(proxy=PROXY_URL)
+
+        bot = Bot(
+            token=BOT_TOKEN,
+            default=DefaultBotProperties(parse_mode=ParseMode.HTML),
+            session=session,
+        )
+    else:
+        bot = Bot(
+            token=BOT_TOKEN,
+            default=DefaultBotProperties(parse_mode=ParseMode.HTML),
+        )
 
     if CRYPTO_BOT_TOKEN:
         ok = await check_app()

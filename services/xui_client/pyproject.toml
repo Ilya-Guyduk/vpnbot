@@ -1,13 +1,13 @@
 [tool.poetry]
-name = "xui_panel_api_client"
+name = "xui_client"
 version = "3.x"
 description = "A client library for accessing 3X-UI Panel API"
 authors = []
 readme = "README.md"
 packages = [
-    { include = "xui_panel_api_client" },
+    { include = "xui_client" },
 ]
-include = ["xui_panel_api_client/py.typed"]
+include = ["xui_client/py.typed"]
 
 [tool.poetry.dependencies]
 python = "^3.11"

@@ -4,7 +4,7 @@ from aiogram import Router, F
 from aiogram.types import CallbackQuery
 
 from keyboards.inline import kb_back_main
-from handlers.utils import safe_edit
+from routers.utils import safe_edit
 
 logger = logging.getLogger(__name__)
 router = Router()

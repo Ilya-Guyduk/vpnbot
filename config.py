@@ -5,6 +5,9 @@ from dotenv import load_dotenv
 load_dotenv()
 logger = logging.getLogger(__name__)
 
+USE_SOCKS5: bool = os.getenv("USE_SOCKS5", "false").lower() == "true"
+
+
 # ── Бот ──────────────────────────────────────────────────────────────────────
 BOT_TOKEN: str = os.getenv("BOT_TOKEN", "")
 if not BOT_TOKEN:
@@ -30,7 +33,12 @@ CRYPTO_ASSET: str = os.getenv("CRYPTO_ASSET", "USDT")
 GITHUB_TOKEN: str = os.getenv("GITHUB_TOKEN", "")
 
 # -- XUI-API
-XUI_API_URL: str = os.getenv("XUI_API_URL", "")
+XUI_API_HOST: str = os.getenv("XUI_API_HOST", "")
+XUI_API_PORT: str = os.getenv("XUI_API_PORT", "")
+XUI_API_PATH: str = os.getenv("XUI_API_PATH", "")
+XUI_SUB_PORT: str = os.getenv("XUI_SUB_PORT", "")
+XUI_SUB_PATH: str = os.getenv("XUI_SUB_PATH", "")
+
 XUI_API_USERNAME: str = os.getenv("XUI_API_USERNAME", "")
 XUI_API_PASSWORD: str = os.getenv("XUI_API_PASSWORD", "")
 XUI_API_TOKEN: str = os.getenv("XUI_API_TOKEN", "")

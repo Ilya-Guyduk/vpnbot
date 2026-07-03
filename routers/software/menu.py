@@ -4,9 +4,9 @@ from aiogram import Router, F
 from aiogram.types import CallbackQuery
 
 from keyboards.inline import kb_software
-from handlers.utils import safe_edit
+from routers.utils import safe_edit
 
-from handlers.software import menu_vpn_clients
+from routers.software import menu_vpn_clients
 
 
 logger = logging.getLogger(__name__)

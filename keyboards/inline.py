@@ -14,7 +14,7 @@ from config import (
 def kb_main() -> InlineKeyboardMarkup:
     b = InlineKeyboardBuilder()
     if VPN_MENU_ENABLED:
-        b.button(text="🔒 Black List VPN",   callback_data="menu_tunnel_type")
+        b.button(text="🔒 BlackList VPN - ЛК",   callback_data="menu_personal_account")
     if SOFTWARE_MENU_ENABLED:
         b.button(text="📦 Софт",              callback_data="menu_software")
     if GUIDES_MENU_ENABLED:
@@ -33,18 +33,6 @@ def kb_main() -> InlineKeyboardMarkup:
     return b.as_markup()
 
 
-def kb_tunnel_type(has_tunnels: bool) -> InlineKeyboardMarkup:
-    """
-    has_tunnels=True  → показываем оба варианта
-    has_tunnels=False → только «Новый туннель»
-    """
-    b = InlineKeyboardBuilder()
-    b.button(text="🌐 Новый туннель",        callback_data="menu_vpn")
-    if has_tunnels:
-        b.button(text="♻️ Продлить существующий", callback_data="menu_extend_vpn")
-    b.button(text="◀️ Назад",                callback_data="menu_main")
-    b.adjust(1)
-    return b.as_markup()
 
 
 def kb_existing_tunnels(tunnels: list) -> InlineKeyboardMarkup:
@@ -68,30 +56,6 @@ def kb_existing_tunnels(tunnels: list) -> InlineKeyboardMarkup:
     return b.as_markup()
 
 
-def kb_vpn_plans(back_cb: str = "menu_tunnel_type") -> InlineKeyboardMarkup:
-    """Тарифы для нового туннеля."""
-    b = InlineKeyboardBuilder()
-    for plan_id, plan in VPN_PLANS.items():
-        b.button(
-            text=f"{plan['name']} — {plan['price']} USDT",
-            callback_data=f"buy_vpn_{plan_id}",
-        )
-    b.button(text="◀️ Назад", callback_data=back_cb)
-    b.adjust(1)
-    return b.as_markup()
-
-
-def kb_vpn_plans_extend(source_order_id: int) -> InlineKeyboardMarkup:
-    """Тарифы для продления конкретного туннеля."""
-    b = InlineKeyboardBuilder()
-    for plan_id, plan in VPN_PLANS.items():
-        b.button(
-            text=f"{plan['name']} — {plan['price']} USDT",
-            callback_data=f"ext_vpn_{plan_id}_{source_order_id}",
-        )
-    b.button(text="◀️ Назад", callback_data="menu_extend_vpn")
-    b.adjust(1)
-    return b.as_markup()
 
 
 def kb_software() -> InlineKeyboardMarkup:

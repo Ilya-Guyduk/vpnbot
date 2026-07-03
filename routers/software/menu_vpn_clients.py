@@ -4,7 +4,7 @@ from aiogram import Router, F
 from aiogram.types import CallbackQuery
 
 from data.vpn_clients import VPN_CLIENTS, ICONS
-from handlers.utils import safe_edit
+from routers.utils import safe_edit
 from keyboards.inline import (
     kb_vpn_clients,
     kb_vpn_client_platforms,

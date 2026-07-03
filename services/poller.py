@@ -6,18 +6,19 @@
 import asyncio
 import logging
 from datetime import datetime, timedelta
-from typing import Optional
 from config import VPN_PLANS
 from keyboards.inline import kb_main
-
+from aiogram import Router
 from aiogram import Bot
 
 from database import db
 from services.cryptobot import get_invoices
-from handlers.vpn.payment import PaymentService, parse_payload
-from services.xui_panel_api_client.xui_panel_api_client.client import AuthenticatedClient
+from routers.personal_accont.payment_service import PaymentService, parse_payload
+from routers.payment import payment_router
+from services.xui_client.xui_client.client import AuthenticatedClient
 
 logger = logging.getLogger(__name__)
+router = Router()
 
 POLL_INTERVAL = 3  # секунд
 
@@ -33,7 +34,7 @@ async def payment_poller(bot: Bot, xui_client: AuthenticatedClient) -> None:
     logger.info("Поллер платежей запущен (интервал %ds)", POLL_INTERVAL)
     
     payment_service = PaymentService(bot, xui_client)
-    
+    router.include_router(payment_router)
     while True:
         try:
             await _poll_once(bot, payment_service)
@@ -75,29 +76,24 @@ async def _poll_once(bot: Bot, payment_service: PaymentService) -> None:
             try:
                 # Парсим payload для получения plan_id
                 plan_id, _ = parse_payload(inv.payload)
-                # В новой структуре нет parent_tunnel_id, так как мы не храним туннели
-                parent_tunnel_id = None
             except (ValueError, AttributeError):
                 # Если не удалось распарсить, используем значения по умолчанию
                 plan_id = list(VPN_PLANS.keys())[0] if VPN_PLANS else "basic"
-                parent_tunnel_id = None
                 logger.warning("Не удалось распарсить payload для payment %s", row["id"])
             
             # Рассчитываем дату окончания подписки
-            duration_days = row["duration_days"]
-            expires_at = datetime.now() + timedelta(days=duration_days)
-            
-            # Отмечаем платеж как оплаченный
-            db.mark_payment_paid(row["id"], expires_at)
+            expires_at = datetime.now() + timedelta(days=row["duration_days"])
             
             # Обрабатываем активацию туннеля через сервис
             success = await payment_service.process_payment(
                 payment_id=row["id"],
                 user_id=row["user_id"],
                 plan_id=plan_id,
-                duration_days=duration_days,
+                duration_days=row["duration_days"],
                 expires_at=expires_at,
-                parent_tunnel_id=None  # В новой версии не используем
+                #is_extend=row["is_extend"],
+                parent_tunnel_id=None,  # Убираем этот параметр или оставляем
+                invoice_id=inv.invoice_id
             )
             
             if success:
